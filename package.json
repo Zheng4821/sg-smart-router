@@ -1,0 +1,9 @@
+{
+  "name": "sg-traffic-router",
+  "version": "1.0.0",
+  "description": "Fastest-route planner for Singapore using live LTA DataMall traffic speed bands and incidents",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" },
+  "engines": { "node": ">=18" },
+  "dependencies": { "express": "^4.19.2" }
+}

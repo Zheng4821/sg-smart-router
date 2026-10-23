@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#2563eb">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" type="image/png" href="/icons/icon-192.png">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="SG Route">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<title>SG Smart Route</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+  :root { --bg:#fff; --fg:#111827; --muted:#6b7280; --line:#e5e7eb; --card:#f9fafb; --accent:#2563eb; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#111827; --fg:#f3f4f6; --muted:#9ca3af; --line:#374151; --card:#1f2937; --accent:#60a5fa; } }
+  * { box-sizing: border-box; }
+  html, body { height:100%; margin:0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background:var(--bg); color:var(--fg); }
+  #app { display:flex; height:100%; height:100dvh; padding-top:env(safe-area-inset-top); padding-bottom:env(safe-area-inset-bottom); }
+  #panel { width:380px; max-width:100%; padding:16px; overflow-y:auto; border-right:1px solid var(--line); flex-shrink:0; }
+  #map { flex:1; }
+  h1 { font-size:18px; margin:0 0 12px; }
+  .field { position:relative; margin-bottom:8px; display:flex; gap:6px; }
+  .field input { flex:1; padding:10px 12px; border:1px solid var(--line); border-radius:8px; font-size:14px; background:var(--bg); color:var(--fg); }
+  button { cursor:pointer; border:1px solid var(--line); background:var(--card); color:var(--fg); border-radius:8px; padding:8px 10px; font-size:13px; }
+  button.primary { background:var(--accent); color:#fff; border-color:var(--accent); width:100%; padding:11px; font-size:15px; margin-top:4px; }
+  button:disabled { opacity:.5; cursor:default; }
+  .sugg { position:absolute; top:100%; left:0; right:48px; z-index:1000; background:var(--bg); border:1px solid var(--line); border-radius:8px; box-shadow:0 6px 18px rgba(0,0,0,.15); max-height:220px; overflow:auto; }
+  .sugg div { padding:8px 12px; font-size:13px; cursor:pointer; }
+  .sugg div:hover { background:var(--card); }
+  .sugg small { display:block; color:var(--muted); }
+  .row { display:flex; gap:6px; margin:6px 0 12px; }
+  .row button { flex:1; }
+  #status { font-size:12px; color:var(--muted); margin:8px 0; min-height:16px; }
+  #status.err { color:#dc2626; }
+  .card { border:2px solid var(--line); background:var(--card); border-radius:12px; padding:12px; margin-bottom:10px; cursor:pointer; }
+  .card.sel { border-color:var(--accent); }
+  .top { display:flex; justify-content:space-between; align-items:baseline; }
+  .mins { font-size:26px; font-weight:700; }
+  .via { font-size:13px; margin-top:2px; }
+  .meta { font-size:12px; color:var(--muted); margin-top:6px; display:flex; flex-wrap:wrap; gap:4px 12px; }
+  .tag { font-size:11px; padding:2px 8px; border-radius:99px; background:#16a34a; color:#fff; margin-left:6px; vertical-align:middle; }
+  .delay-ok { color:#16a34a; } .delay-mid { color:#d97706; } .delay-bad { color:#dc2626; }
+  .legend { display:flex; gap:10px; flex-wrap:wrap; font-size:11px; color:var(--muted); margin-top:12px; }
+  .legend i { display:inline-block; width:14px; height:5px; border-radius:3px; margin-right:4px; vertical-align:middle; }
+  .live { display:flex; gap:10px; align-items:flex-start; padding:10px 12px; border:1px solid var(--line); border-radius:8px; margin:0 0 10px; cursor:pointer; background:var(--card); }
+  .live small { color:var(--muted); font-size:11px; }
+  .live input { margin-top:3px; }
+  #alert { background:#fef3c7; color:#78350f; border:1px solid #f59e0b; border-radius:8px; padding:10px 12px; font-size:13px; margin-bottom:10px; }
+  #alert time { display:block; font-size:11px; opacity:.7; margin-top:2px; }
+  .badge-live { display:inline-block; width:8px; height:8px; border-radius:50%; background:#16a34a; margin-right:6px; animation:pulse 1.4s infinite; }
+  @keyframes pulse { 50% { opacity:.25; } }
+  @media (max-width: 760px) { #app { flex-direction:column-reverse; } #panel { width:100%; height:50%; border-right:0; border-top:1px solid var(--line); } #map { height:50%; } }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="panel">
+    <h1>🚗 SG Smart Route</h1>
+    <div class="field"><input id="from" placeholder="From (address, postal code, place)" autocomplete="off"><button id="locBtn" title="Use my location">📍</button><div class="sugg" id="sugg-from" hidden></div></div>
+    <div class="field"><input id="to" placeholder="To" autocomplete="off"><button id="swapBtn" title="Swap">⇅</button><div class="sugg" id="sugg-to" hidden></div></div>
+    <div class="row"><button id="pickFrom">Pick start on map</button><button id="pickTo">Pick end on map</button></div>
+    <label class="live"><input type="checkbox" id="live"><span><b>Live reroute</b><br><small>Follows your GPS and automatically switches route when traffic changes</small></span></label>
+    <div id="alert" hidden></div>
+    <button class="primary" id="go" disabled>Find fastest route</button>
+    <div id="status"></div>
+    <div id="results"></div>
+    <div class="legend">
+      <span><i style="background:#dc2626"></i>&lt;20 km/h</span>
+      <span><i style="background:#f59e0b"></i>20–40</span>
+      <span><i style="background:#84cc16"></i>40–60</span>
+      <span><i style="background:#16a34a"></i>60+</span>
+      <span><i style="background:#6b7280"></i>no live data</span>
+    </div>
+  </div>
+  <div id="map"></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const map = L.map('map').setView([1.3521, 103.8198], 12);
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 19,
+  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors | Traffic data: LTA DataMall'
+}).addTo(map);
+
+const state = { from: null, to: null, pick: null, routes: [], sel: 0, sig: null, live: false, watchId: null, gpsFix: false };
+const routeLayer = L.layerGroup().addTo(map);
+const incLayer = L.layerGroup().addTo(map);
+const markers = {};
+
+const bandColor = b => b === 0 ? '#6b7280' : b <= 2 ? '#dc2626' : b <= 4 ? '#f59e0b' : b <= 6 ? '#84cc16' : '#16a34a';
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+const mins = s => Math.max(1, Math.round(s / 60));
+const setStatus = (t, err) => { $('status').textContent = t || ''; $('status').className = err ? 'err' : ''; };
+
+/* ---------- places ---------- */
+function setPlace(kind, p) {
+  state[kind] = p;
+  $(kind).value = p.label;
+  if (markers[kind]) map.removeLayer(markers[kind]);
+  markers[kind] = L.marker([p.lat, p.lon], { title: kind }).addTo(map).bindTooltip(kind === 'from' ? 'Start' : 'Destination');
+  $('go').disabled = !(state.from && state.to);
+  if (!(state.from && state.to)) map.setView([p.lat, p.lon], 15);
+}
+
+let timers = {};
+for (const kind of ['from', 'to']) {
+  const input = $(kind), box = $('sugg-' + kind);
+  input.addEventListener('input', () => {
+    state[kind] = null; $('go').disabled = true;
+    clearTimeout(timers[kind]);
+    timers[kind] = setTimeout(async () => {
+      const q = input.value.trim(); if (q.length < 2) { box.hidden = true; return; }
+      try {
+        const r = await (await fetch('/api/geocode?q=' + encodeURIComponent(q))).json();
+        box.innerHTML = '';
+        r.forEach(p => {
+          const d = document.createElement('div');
+          d.innerHTML = `${esc(p.label)}<small>${esc(p.address)}</small>`;
+          d.onclick = () => { box.hidden = true; setPlace(kind, p); };
+          box.appendChild(d);
+        });
+        box.hidden = !r.length;
+      } catch { box.hidden = true; }
+    }, 300);
+  });
+  input.addEventListener('blur', () => setTimeout(() => box.hidden = true, 200));
+}
+
+$('locBtn').onclick = () => navigator.geolocation?.getCurrentPosition(
+  pos => setPlace('from', { label: 'My location', lat: pos.coords.latitude, lon: pos.coords.longitude }),
+  () => setStatus('Could not get your location.', true));
+$('swapBtn').onclick = () => {
+  const f = state.from, t = state.to; state.from = state.to = null;
+  if (t) setPlace('from', t); else $('from').value = $('to').value;
+  if (f) setPlace('to', f); else $('to').value = '';
+};
+$('pickFrom').onclick = () => { state.pick = 'from'; setStatus('Click the map to set the start.'); };
+$('pickTo').onclick = () => { state.pick = 'to'; setStatus('Click the map to set the destination.'); };
+map.on('click', e => {
+  const kind = state.pick || (!state.from ? 'from' : 'to');
+  state.pick = null; setStatus('');
+  setPlace(kind, { label: `Pinned (${e.latlng.lat.toFixed(5)}, ${e.latlng.lng.toFixed(5)})`, lat: e.latlng.lat, lon: e.latlng.lng });
+});
+
+/* ---------- routing ---------- */
+const sig = r => r.via.join('|');
+const label = r => r.via.join(' & ') || 'local roads';
+function pickRoute(i) { state.sel = i; state.sig = sig(state.routes[i]); render(false); }
+
+function announce(msg) {
+  const t = new Date().toLocaleTimeString('en-SG', { hour: '2-digit', minute: '2-digit' });
+  const el = $('alert'); el.hidden = false; el.innerHTML = `${esc(msg)}<time>${t}</time>`;
+  try { navigator.vibrate?.([200, 100, 200]); } catch {}
+}
+
+async function findRoutes(mode = 'manual') {
+  if (!state.from || !state.to) return;
+  const manual = mode === 'manual';
+  if (manual) {
+    $('go').disabled = true;
+    setStatus('Fetching live traffic and routes… (first request can take ~20s while speed bands load)');
+  }
+  try {
+    const q = new URLSearchParams({ fromLat: state.from.lat, fromLon: state.from.lon, toLat: state.to.lat, toLon: state.to.lon });
+    const res = await fetch('/api/route?' + q);
+    const j = await res.json();
+    if (!res.ok) throw new Error(j.error || 'Request failed');
+
+    const old = state.sig;
+    state.routes = j.routes; state.sel = 0;
+
+    if (!manual && old) {
+      const curIdx = j.routes.findIndex(r => sig(r) === old);
+      const best = j.routes[0];
+      if (curIdx > 0) {
+        const cur = j.routes[curIdx], gain = cur.liveSec - best.liveSec;
+        // Only switch if clearly better, to avoid flip-flopping on small changes
+        if (gain >= Math.max(120, cur.liveSec * 0.1)) {
+          if (state.live) { state.sel = 0; announce(`🔄 Traffic changed. Switched to ${label(best)}. Saves ${mins(gain)} min.`); }
+          else { state.sel = curIdx; announce(`💡 A faster route is now available via ${label(best)} (saves ${mins(gain)} min). Click it to switch.`); }
+        } else state.sel = curIdx;
+      } else if (curIdx < 0 && state.live) {
+        announce(`Route recalculated from your position: via ${label(best)}.`);
+      }
+    }
+    state.sig = sig(state.routes[state.sel]);
+
+    const t = new Date(j.trafficUpdatedAt).toLocaleTimeString('en-SG', { hour: '2-digit', minute: '2-digit' });
+    setStatus(state.live ? `● Live: checking traffic every minute. Traffic data from ${t}.`
+                         : `Traffic data from ${t}. Auto-refreshes every 5 min.`);
+    render(manual);
+  } catch (e) { setStatus(e.message, true); }
+  if (manual) $('go').disabled = false;
+}
+$('go').onclick = () => findRoutes('manual');
+
+let tick = 0;
+setInterval(() => {
+  if (!state.routes.length) return;
+  tick++;
+  if (state.live) findRoutes('auto');
+  else if (tick % 5 === 0) findRoutes('refresh');
+}, 60 * 1000);
+
+/* ---------- live GPS rerouting ---------- */
+function distKm(a, b) {
+  const R = 6371, rad = Math.PI / 180;
+  const dLat = (b.lat - a.lat) * rad, dLon = (b.lon - a.lon) * rad;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
+function stopLive(msg) {
+  if (state.watchId != null) navigator.geolocation.clearWatch(state.watchId);
+  state.watchId = null; state.live = false; state.gpsFix = false; releaseScreen();
+  $('live').checked = false;
+  if (msg) setStatus(msg);
+}
+
+function onPos(pos) {
+  const p = { label: 'My location', lat: pos.coords.latitude, lon: pos.coords.longitude };
+  state.from = p; $('from').value = 'My location (live)';
+  if (markers.from) markers.from.setLatLng([p.lat, p.lon]);
+  else markers.from = L.marker([p.lat, p.lon]).addTo(map).bindTooltip('You');
+
+  if (state.to && distKm(p, state.to) < 0.1) { announce('🏁 You have arrived at your destination.'); stopLive('Arrived.'); return; }
+  if (!state.gpsFix) { state.gpsFix = true; findRoutes('manual'); }   // first fix: plan immediately
+}
+
+$('live').onchange = e => {
+  if (!e.target.checked) { stopLive('Live reroute off.'); return; }
+  if (!navigator.geolocation) { stopLive('This browser does not support GPS.'); setStatus('This browser does not support GPS.', true); return; }
+  if (!state.to) { stopLive(); setStatus('Set a destination first, then turn on Live reroute.', true); return; }
+  state.live = true; state.gpsFix = false; holdScreen();
+  setStatus('Waiting for your GPS location… allow location access when asked.');
+  state.watchId = navigator.geolocation.watchPosition(onPos,
+    err => { stopLive(); setStatus('GPS error: ' + err.message + '. Live reroute needs location permission.', true); },
+    { enableHighAccuracy: true, maximumAge: 10000, timeout: 30000 });
+};
+
+function render(fit) {
+  routeLayer.clearLayers();
+  state.routes.forEach((r, i) => {
+    if (i === state.sel) return;
+    const line = L.polyline(r.segments.flatMap(s => s.coords), { color: '#94a3b8', weight: 6, opacity: .85 }).addTo(routeLayer);
+    line.on('click', () => pickRoute(i));
+  });
+  const r = state.routes[state.sel];
+  const all = r.segments.flatMap(s => s.coords);
+  L.polyline(all, { color: '#fff', weight: 10, opacity: .95 }).addTo(routeLayer);
+  r.segments.forEach(s => L.polyline(s.coords, { color: bandColor(s.band), weight: 6, lineCap: 'butt' }).addTo(routeLayer));
+  r.incidents.forEach(i => L.circleMarker([i.lat, i.lon], { radius: 9, color: '#7c2d12', fillColor: '#f97316', fillOpacity: 1, weight: 2 })
+    .bindPopup(`<b>${esc(i.type)}</b><br>${esc(i.message)}`).addTo(routeLayer));
+  if (fit) map.fitBounds(L.polyline(all).getBounds(), { padding: [40, 40] });
+
+  $('results').innerHTML = state.routes.map((r, i) => {
+    const d = mins(r.delaySec), cls = r.delaySec < 120 ? 'delay-ok' : r.delaySec < 420 ? 'delay-mid' : 'delay-bad';
+    const saved = r.savedVsDefaultSec >= 60 ? `<span class="delay-ok">saves ${mins(r.savedVsDefaultSec)} min vs usual route</span>` : '';
+    return `<div class="card ${i === state.sel ? 'sel' : ''}" data-i="${i}">
+      <div class="top"><span class="mins">${mins(r.liveSec)} min${r.fastest ? '<span class="tag">Fastest</span>' : ''}</span><span>${r.distanceKm.toFixed(1)} km</span></div>
+      <div class="via">via ${esc(r.via.join(' & ') || 'local roads')}</div>
+      <div class="meta">
+        <span class="${cls}">${r.delaySec < 60 ? 'No significant delay' : '+' + d + ' min from traffic'}</span>
+        <span>Free-flow ${mins(r.baseSec)} min</span>
+        ${r.incidents.length ? `<span>⚠ ${r.incidents.length} incident${r.incidents.length > 1 ? 's' : ''}</span>` : ''}
+        ${saved}
+        <span>Live data on ${Math.round(r.coverage * 100)}% of route</span>
+      </div></div>`;
+  }).join('');
+  document.querySelectorAll('.card').forEach(c => c.onclick = () => pickRoute(+c.dataset.i));
+}
+
+
+/* ---------- keep screen awake while live (iOS 16.4+, Chrome) ---------- */
+let wakeLock = null;
+async function holdScreen() { try { wakeLock = await navigator.wakeLock?.request('screen'); } catch {} }
+function releaseScreen() { try { wakeLock?.release(); } catch {} wakeLock = null; }
+document.addEventListener('visibilitychange', () => { if (state.live && document.visibilityState === 'visible') holdScreen(); });
+
+/* ---------- PWA ---------- */
+if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+
+/* ---------- incidents overlay ---------- */
+async function loadIncidents() {
+  try {
+    const list = await (await fetch('/api/incidents')).json();
+    incLayer.clearLayers();
+    list.forEach(i => L.circleMarker([i.lat, i.lon], { radius: 5, color: '#9a3412', fillColor: '#fb923c', fillOpacity: .9, weight: 1 })
+      .bindPopup(`<b>${esc(i.type)}</b><br>${esc(i.message)}`).addTo(incLayer));
+  } catch {}
+}
+loadIncidents(); setInterval(loadIncidents, 2 * 60 * 1000);
+</script>
+</body>
+</html>
