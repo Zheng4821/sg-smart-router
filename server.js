@@ -160,7 +160,30 @@ function scoreRoute(route, index, incidents) {
 }
 
 /* ---------- API ---------- */
-app.use(express.static(__dirname + '/public'));
+// Serve the web app files. Works whether they sit in ./public (normal) or
+// directly in the project root (e.g. if a GitHub upload flattened the folders).
+// Only this fixed list of files is ever served, so server.js and .env stay private.
+const fs = require('fs');
+const path = require('path');
+const WEB_FILES = new Set(['index.html', 'manifest.webmanifest', 'sw.js',
+  'icon-192.png', 'icon-512.png', 'icon-maskable-512.png', 'apple-touch-icon.png']);
+function findWebFile(name) {
+  if (!WEB_FILES.has(name)) return null;
+  for (const dir of ['public', 'public/icons', 'icons', '.']) {
+    const f = path.join(__dirname, dir, name);
+    if (fs.existsSync(f)) return f;
+  }
+  return null;
+}
+const sendWeb = (name) => (req, res) => {
+  const f = findWebFile(name);
+  if (!f) return res.status(404).send('File not found on server: ' + name + '. Check that it was uploaded to GitHub.');
+  res.sendFile(f);
+};
+app.get(['/', '/index.html'], sendWeb('index.html'));
+app.get('/manifest.webmanifest', sendWeb('manifest.webmanifest'));
+app.get('/sw.js', sendWeb('sw.js'));
+app.get('/icons/:name', (req, res) => sendWeb(req.params.name)(req, res));
 
 app.get('/api/incidents', async (req, res) => {
   try { res.json(await getIncidents()); } catch (e) { res.status(502).json({ error: e.message }); }
