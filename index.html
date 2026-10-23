@@ -52,7 +52,15 @@
   #alert time { display:block; font-size:11px; opacity:.7; margin-top:2px; }
   .badge-live { display:inline-block; width:8px; height:8px; border-radius:50%; background:#16a34a; margin-right:6px; animation:pulse 1.4s infinite; }
   @keyframes pulse { 50% { opacity:.25; } }
+  #map { position:relative; }
+  #hud { position:absolute; top:10px; left:50%; transform:translateX(-50%); z-index:1000; background:rgba(17,24,39,.92); color:#fff; border-radius:14px; padding:8px 16px; font-size:14px; box-shadow:0 4px 14px rgba(0,0,0,.3); text-align:center; max-width:92%; pointer-events:none; }
+  #hud b { font-size:20px; }
+  #hud small { display:block; opacity:.8; font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #recenter { position:absolute; right:12px; bottom:34px; z-index:1000; background:var(--accent); color:#fff; border:0; border-radius:99px; padding:12px 16px; font-size:14px; font-weight:600; box-shadow:0 4px 14px rgba(0,0,0,.3); }
+  .you-dot { width:22px; height:22px; border-radius:50%; background:#2563eb; border:3px solid #fff; box-shadow:0 0 0 0 rgba(37,99,235,.6); animation:ring 1.8s infinite; }
+  @keyframes ring { 70% { box-shadow:0 0 0 18px rgba(37,99,235,0); } 100% { box-shadow:0 0 0 0 rgba(37,99,235,0); } }
   @media (max-width: 760px) { #app { flex-direction:column-reverse; } #panel { width:100%; height:50%; border-right:0; border-top:1px solid var(--line); } #map { height:50%; } }
+  @media (max-width: 760px) { #app.nav #panel { height:30%; } #app.nav #map { height:70%; } }
 </style>
 </head>
 <body>
@@ -75,7 +83,7 @@
       <span><i style="background:#6b7280"></i>no live data</span>
     </div>
   </div>
-  <div id="map"></div>
+  <div id="map"><div id="hud" hidden></div><button id="recenter" hidden>◎ Follow me</button></div>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
@@ -87,7 +95,7 @@ L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
   attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors | Traffic data: LTA DataMall'
 }).addTo(map);
 
-const state = { from: null, to: null, pick: null, routes: [], sel: 0, sig: null, live: false, watchId: null, gpsFix: false };
+const state = { from: null, to: null, pick: null, routes: [], sel: 0, sig: null, live: false, watchId: null, gpsFix: false, follow: false, pos: null };
 const routeLayer = L.layerGroup().addTo(map);
 const incLayer = L.layerGroup().addTo(map);
 const markers = {};
@@ -131,9 +139,20 @@ for (const kind of ['from', 'to']) {
   input.addEventListener('blur', () => setTimeout(() => box.hidden = true, 200));
 }
 
-$('locBtn').onclick = () => navigator.geolocation?.getCurrentPosition(
-  pos => setPlace('from', { label: 'My location', lat: pos.coords.latitude, lon: pos.coords.longitude }),
-  () => setStatus('Could not get your location.', true));
+function geoErrorMsg(err) {
+  if (err && err.code === 1) return 'Location is blocked. On iPhone: Settings > Privacy & Security > Location Services > Safari Websites > While Using. On Android: tap the padlock in the address bar > Permissions > Location > Allow. Then reopen the app.';
+  if (err && err.code === 2) return 'Your phone could not find its location. Check that Location Services / GPS is on, or move near a window.';
+  if (err && err.code === 3) return 'Getting your location timed out. Try again, ideally outdoors or near a window.';
+  return 'Could not get your location (' + (err && err.message || 'unknown error') + ').';
+}
+$('locBtn').onclick = () => {
+  if (!navigator.geolocation) return setStatus('This browser does not support location.', true);
+  setStatus('Getting your location… allow access if asked.');
+  navigator.geolocation.getCurrentPosition(
+    pos => { setStatus(''); setPlace('from', { label: 'My location', lat: pos.coords.latitude, lon: pos.coords.longitude }); },
+    err => setStatus(geoErrorMsg(err), true),
+    { enableHighAccuracy: false, timeout: 20000, maximumAge: 60000 });
+};
 $('swapBtn').onclick = () => {
   const f = state.from, t = state.to; state.from = state.to = null;
   if (t) setPlace('from', t); else $('from').value = $('to').value;
@@ -217,29 +236,70 @@ function distKm(a, b) {
 
 function stopLive(msg) {
   if (state.watchId != null) navigator.geolocation.clearWatch(state.watchId);
-  state.watchId = null; state.live = false; state.gpsFix = false; releaseScreen();
+  const wasLive = state.live; state.watchId = null; state.live = false; state.gpsFix = false; state.follow = false; releaseScreen(); if (wasLive) setNav(false);
   $('live').checked = false;
   if (msg) setStatus(msg);
 }
 
+let youMarker = null;
+const LIVE_ZOOM = 16;
+
+function setNav(on) {
+  $('app').classList.toggle('nav', on);
+  $('hud').hidden = !on;
+  if (!on) {
+    $('recenter').hidden = true;
+    if (youMarker) { map.removeLayer(youMarker); youMarker = null; }
+    if (state.from) markers.from = L.marker([state.from.lat, state.from.lon]).addTo(map).bindTooltip('Start');
+  }
+  setTimeout(() => map.invalidateSize(), 150);
+}
+
+function updateHud(r) {
+  if (!state.live || !r) return;
+  const eta = new Date(Date.now() + r.liveSec * 1000).toLocaleTimeString('en-SG', { hour: '2-digit', minute: '2-digit' });
+  $('hud').innerHTML = `<b>${mins(r.liveSec)} min</b> · ${r.distanceKm.toFixed(1)} km · arrive ${eta}<small>via ${esc(label(r))}</small>`;
+}
+
+function followMe() {
+  if (!state.pos) return;
+  state.follow = true; $('recenter').hidden = true;
+  map.setView([state.pos.lat, state.pos.lon], Math.max(map.getZoom(), LIVE_ZOOM), { animate: true });
+}
+$('recenter').onclick = followMe;
+// If the user drags the map themselves, stop auto-following until they tap "Follow me".
+map.on('dragstart', () => { if (state.live) { state.follow = false; $('recenter').hidden = false; } });
+
 function onPos(pos) {
   const p = { label: 'My location', lat: pos.coords.latitude, lon: pos.coords.longitude };
-  state.from = p; $('from').value = 'My location (live)';
-  if (markers.from) markers.from.setLatLng([p.lat, p.lon]);
-  else markers.from = L.marker([p.lat, p.lon]).addTo(map).bindTooltip('You');
+  state.from = p; state.pos = p; $('from').value = 'My location (live)';
+
+  if (markers.from) { map.removeLayer(markers.from); markers.from = null; }   // replace pin with the live dot
+  if (!youMarker) youMarker = L.marker([p.lat, p.lon], { icon: L.divIcon({ className: '', html: '<div class="you-dot"></div>', iconSize: [22, 22], iconAnchor: [11, 11] }), zIndexOffset: 1000 }).addTo(map);
+  else youMarker.setLatLng([p.lat, p.lon]);
 
   if (state.to && distKm(p, state.to) < 0.1) { announce('🏁 You have arrived at your destination.'); stopLive('Arrived.'); return; }
-  if (!state.gpsFix) { state.gpsFix = true; findRoutes('manual'); }   // first fix: plan immediately
+
+  if (!state.gpsFix) {
+    state.gpsFix = true;
+    map.setView([p.lat, p.lon], LIVE_ZOOM);                                     // zoom in right away
+    findRoutes('manual').then(() => { if (state.follow) map.setView([p.lat, p.lon], LIVE_ZOOM); });
+  } else if (state.follow) {
+    map.panTo([p.lat, p.lon], { animate: true, duration: 0.8 });                 // keep the map centred on you
+  }
 }
 
 $('live').onchange = e => {
   if (!e.target.checked) { stopLive('Live reroute off.'); return; }
   if (!navigator.geolocation) { stopLive('This browser does not support GPS.'); setStatus('This browser does not support GPS.', true); return; }
   if (!state.to) { stopLive(); setStatus('Set a destination first, then turn on Live reroute.', true); return; }
-  state.live = true; state.gpsFix = false; holdScreen();
+  state.live = true; state.gpsFix = false; state.follow = true; holdScreen(); setNav(true);
   setStatus('Waiting for your GPS location… allow location access when asked.');
   state.watchId = navigator.geolocation.watchPosition(onPos,
-    err => { stopLive(); setStatus('GPS error: ' + err.message + '. Live reroute needs location permission.', true); },
+    err => {
+      if (err.code === 1) { stopLive(); setStatus(geoErrorMsg(err), true); }
+      else setStatus(geoErrorMsg(err) + ' Still trying…', true);   // timeouts/unavailable: keep waiting
+    },
     { enableHighAccuracy: true, maximumAge: 10000, timeout: 30000 });
 };
 
@@ -256,7 +316,8 @@ function render(fit) {
   r.segments.forEach(s => L.polyline(s.coords, { color: bandColor(s.band), weight: 6, lineCap: 'butt' }).addTo(routeLayer));
   r.incidents.forEach(i => L.circleMarker([i.lat, i.lon], { radius: 9, color: '#7c2d12', fillColor: '#f97316', fillOpacity: 1, weight: 2 })
     .bindPopup(`<b>${esc(i.type)}</b><br>${esc(i.message)}`).addTo(routeLayer));
-  if (fit) map.fitBounds(L.polyline(all).getBounds(), { padding: [40, 40] });
+  if (fit && !state.live) map.fitBounds(L.polyline(all).getBounds(), { padding: [40, 40] });
+  updateHud(r);
 
   $('results').innerHTML = state.routes.map((r, i) => {
     const d = mins(r.delaySec), cls = r.delaySec < 120 ? 'delay-ok' : r.delaySec < 420 ? 'delay-mid' : 'delay-bad';
