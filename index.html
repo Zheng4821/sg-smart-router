@@ -161,6 +161,7 @@ $('swapBtn').onclick = () => {
 $('pickFrom').onclick = () => { state.pick = 'from'; setStatus('Click the map to set the start.'); };
 $('pickTo').onclick = () => { state.pick = 'to'; setStatus('Click the map to set the destination.'); };
 map.on('click', e => {
+  if (state.live) { setStatus('🔒 Destination is locked while Live reroute is on. Untick Live reroute to change it.'); return; }
   const kind = state.pick || (!state.from ? 'from' : 'to');
   state.pick = null; setStatus('');
   setPlace(kind, { label: `Pinned (${e.latlng.lat.toFixed(5)}, ${e.latlng.lng.toFixed(5)})`, lat: e.latlng.lat, lon: e.latlng.lng });
@@ -247,6 +248,9 @@ const LIVE_ZOOM = 16;
 function setNav(on) {
   $('app').classList.toggle('nav', on);
   $('hud').hidden = !on;
+  for (const id of ['pickFrom', 'pickTo', 'swapBtn', 'locBtn']) $(id).disabled = on;   // no map-picking / swapping mid-trip
+  $('from').readOnly = on;
+  if (on) state.pick = null;
   if (!on) {
     $('recenter').hidden = true;
     if (youMarker) { map.removeLayer(youMarker); youMarker = null; }
